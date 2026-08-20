@@ -50,7 +50,7 @@ export async function saveProfile(profile) {
   return data
 }
 
-export async function listProfiles(limit = 12) {
+export async function listProfiles(limit = 24) {
   if (!backendConfigured) return []
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return []
@@ -59,9 +59,43 @@ export async function listProfiles(limit = 12) {
   return data || []
 }
 
-export async function listEvents(limit = 20) {
+export async function sendLike(targetUserId) {
+  if (!backendConfigured) throw new Error('Backend noch nicht konfiguriert')
+  const { data, error } = await supabase.rpc('send_like', { target_user: targetUserId })
+  if (error) throw error
+  return data?.[0] || { matched: false, match_id: null }
+}
+
+export async function listMatches() {
   if (!backendConfigured) return []
-  const { data, error } = await supabase.from('events').select('*').order('starts_at').limit(limit)
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return []
+  const { data, error } = await supabase.from('matches').select('id,user_a,user_b,status,created_at').eq('status','active').order('created_at',{ascending:false})
+  if (error) throw error
+  if (!data?.length) return []
+  const otherIds = data.map(m => m.user_a === user.id ? m.user_b : m.user_a)
+  const { data: profiles, error: profileError } = await supabase.from('profiles').select('id,display_name,city,bio,avatar_url,verified').in('id', otherIds)
+  if (profileError) throw profileError
+  const byId = Object.fromEntries((profiles || []).map(p => [p.id,p]))
+  return data.map(m => ({ ...m, person: byId[m.user_a === user.id ? m.user_b : m.user_a] })).filter(m=>m.person)
+}
+
+export function subscribeMatches(callback) {
+  if (!backendConfigured) return { unsubscribe() {} }
+  const channel = supabase.channel('matches-live').on('postgres_changes',{event:'*',schema:'public',table:'matches'},callback).subscribe()
+  return { unsubscribe:()=>supabase.removeChannel(channel) }
+}
+
+export async function listEvents(limit = 30) {
+  if (!backendConfigured) return []
+  const { data, error } = await supabase.from('events').select('*').gte('starts_at',new Date().toISOString()).order('starts_at').limit(limit)
+  if (error) throw error
+  return data || []
+}
+
+export async function listMyBookings() {
+  if (!backendConfigured) return []
+  const { data, error } = await supabase.from('event_bookings').select('*,events(*)').order('created_at',{ascending:false})
   if (error) throw error
   return data || []
 }
@@ -93,10 +127,16 @@ export async function listVisibleLiveLocations() {
 }
 
 export async function loadMessages(matchId) {
-  if (!backendConfigured) return []
+  if (!backendConfigured || !matchId) return []
   const { data, error } = await supabase.from('messages').select('*').eq('match_id', matchId).order('created_at')
   if (error) throw error
   return data || []
+}
+
+export function subscribeMessages(matchId, callback) {
+  if (!backendConfigured || !matchId) return { unsubscribe() {} }
+  const channel = supabase.channel(`messages-${matchId}`).on('postgres_changes',{event:'INSERT',schema:'public',table:'messages',filter:`match_id=eq.${matchId}`},payload=>callback(payload.new)).subscribe()
+  return { unsubscribe:()=>supabase.removeChannel(channel) }
 }
 
 export async function sendMessage(matchId, body) {

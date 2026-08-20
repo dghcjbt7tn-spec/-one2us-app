@@ -1,139 +1,32 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 
-const profiles = [
-  { name: 'Lea', age: 31, city: 'Frankfurt', match: 94, tags: ['Live-Musik', 'Weekend Trips', 'Food'], quote: 'Lieber ein richtig gutes Date als 200 Chats.', emoji: '✨' },
-  { name: 'Mara', age: 29, city: 'Heidelberg', match: 91, tags: ['Running', 'Wine', 'Design'], quote: 'Spontan nach Italien? Bin dabei.', emoji: '☀️' },
-  { name: 'Nina', age: 33, city: 'Mainz', match: 88, tags: ['Rock', 'Dogs', 'Travel'], quote: 'Humor, Haltung und ein bisschen Chaos.', emoji: '⚡' }
-]
+const intents = [['♡','Date'],['♧','Drink'],['🍴','Dinner'],['♫','Music'],['✣','Move'],['☆','Party'],['✈','Trip'],['♨','Chill'],['●','Event'],['◌','Explore'],['⚽','Sport'],['+','Andere']]
+const times = ['Jetzt · In den nächsten 2 Stunden','Heute Abend · Ab 18:00','Dieses Wochenende · Sa–So','Irgendwann · Passt mir zusammen']
+const matchTypes = [['ONE','Jemand Besonderes','Date / romantisch'],['2','Neue Freunde','Locker kennenlernen'],['US','Eine Gruppe','Gemeinsam ist besser']]
+const people = [{name:'Mara',age:34,match:96},{name:'Tim',age:36,match:92},{name:'Lea',age:33,match:91},{name:'Max',age:35,match:89},{name:'Sara',age:32,match:88},{name:'Ben',age:37,match:86}]
+const experiences = [{title:'Cocktail Night',meta:'Heute · 19:30 · 1,2 km',price:19},{title:'Live Konzert',meta:'Heute · 20:00 · 2,1 km',price:24},{title:'Running Crew',meta:'Morgen · 09:00 · 1,5 km',price:9}]
 
-const events = [
-  { day: '28', month: 'AUG', title: 'ONE NIGHT Frankfurt', meta: 'Rooftop · 80 Singles · 25–40', price: '19 €' },
-  { day: '05', month: 'SEP', title: '2:US Dinner Club', meta: 'Private Dining · 24 Singles', price: '29 €' },
-  { day: '12', month: 'SEP', title: 'Sunday Walk & Coffee', meta: 'Easy Match · Frankfurt', price: '9 €' }
-]
+function Logo({compact=false}) { return <div className={'logo '+(compact?'compact':'')}><span>One</span><i>:</i><b>2</b><i>:</i><span>Us</span></div> }
 
-function Logo() {
-  return <div className="logo"><span>ONE</span><b>:2:</b><span>US</span></div>
+export default function App(){
+ const [screen,setScreen]=useState('home'); const [intent,setIntent]=useState('Date'); const [time,setTime]=useState(times[1]); const [type,setType]=useState('ONE'); const [credits,setCredits]=useState(12); const [toast,setToast]=useState(''); const [checkout,setCheckout]=useState(null)
+ const flash=m=>{setToast(m);setTimeout(()=>setToast(''),1700)}
+ const pay=(label,amount)=>setCheckout({label,amount})
+ const confirmPay=()=>{setCredits(v=>v+checkout.amount);flash(`${checkout.amount} Credits gekauft`);setCheckout(null)}
+ return <div className="app-shell"><main className="phone">
+  <header className="topbar"><Logo/><button className="credit-pill" onClick={()=>setScreen('wallet')}>● {credits}</button></header>
+  <section className="content">
+   {screen==='home'&&<><div className="hello"><h1>Hey Leon! 👋</h1><p>Was willst du heute?</p></div><div className="intent-grid">{intents.map(([ic,n])=><button className={intent===n?'selected':''} key={n} onClick={()=>setIntent(n)}><span>{ic}</span>{n}</button>)}</div><h4>ONE, 2 oder US?</h4><div className="mode-grid"><button className={type==='ONE'?'one active':'one'} onClick={()=>setType('ONE')}><b>ONE</b><small>Für mich</small></button><button className={type==='2'?'two active':'two'} onClick={()=>setType('2')}><b>2</b><small>Mit jemandem</small></button><button className={type==='US'?'us active':'us'} onClick={()=>setType('US')}><b>US</b><small>In einer Gruppe</small></button></div><button className="primary" onClick={()=>setScreen('time')}>Weiter</button></>}
+   {screen==='time'&&<><div className="page-title"><h1>Wann?</h1><p>Sag uns, wann es passt.</p></div><div className="choice-list">{times.map(t=><button className={time===t?'active':''} onClick={()=>setTime(t)} key={t}>{t}</button>)}</div><button className="primary" onClick={()=>setScreen('type')}>Weiter</button></>}
+   {screen==='type'&&<><div className="page-title"><h1>Mit wem?</h1><p>Wer passt zu dir?</p></div><div className="choice-list">{matchTypes.map(([k,a,b])=><button className={type===k?'active':''} onClick={()=>setType(k)} key={k}><strong>{k}</strong><span><b>{a}</b><small>{b}</small></span></button>)}</div><button className="primary" onClick={()=>setScreen('matches')}>Matches finden · 1 Credit</button></>}
+   {screen==='matches'&&<><div className="page-title"><h1>Deine Matches</h1><p>Passende Menschen für {intent}.</p></div><div className="people-grid">{people.map(p=><button key={p.name} onClick={()=>flash(`${p.name} ausgewählt`)}><div className="person">{p.name[0]}</div><b>{p.name}, {p.age}</b><small>{p.match}% Match</small></button>)}</div><button className="primary" onClick={()=>{if(credits<1)return setScreen('wallet');setCredits(v=>v-1);setScreen('experiences')}}>Vorschläge anzeigen · 1 Credit</button></>}
+   {screen==='experiences'&&<><div className="page-title"><h1>Vorschläge für dich</h1><p>{intent} · {time.split(' · ')[0]}</p></div><div className="experience-list">{experiences.map(e=><button key={e.title} onClick={()=>setScreen('event')}><div className="event-img">✦</div><span><b>{e.title}</b><small>{e.meta}</small></span><strong>{e.price} €</strong></button>)}</div></>}
+   {screen==='event'&&<><div className="event-cover">ONE NIGHT</div><div className="event-detail"><h1>Cocktail Night</h1><p>Heute · 19:30<br/>Lübeck · 1,2 km</p><p>5 Personen gehen hin</p><div className="avatars">● ● ● ● ●</div><button className="primary" onClick={()=>pay('Cocktail Night Ticket',19)}>Ich bin dabei! · 19 €</button></div></>}
+   {screen==='wallet'&&<><div className="page-title"><h1>Pay per use.</h1><p>Kein Abo. Du zahlst nur, wenn du One:2:Us nutzt.</p></div><div className="balance"><small>Dein Guthaben</small><strong>{credits}</strong><span>Credits</span></div><div className="packs">{[[10,9.9],[25,19.9],[60,39.9]].map(([c,p])=><button key={c} onClick={()=>pay(`${c} Credits`,c)}><b>{c} Credits</b><span>{p.toFixed(2).replace('.',',')} €</span></button>)}</div><div className="payment-note"><b>Sichere Zahlung</b><p>Apple Pay · Google Pay · Karte</p><small>Demo-Checkout – für echte Zahlungen wird im Produktionsbetrieb ein Payment-Provider serverseitig angebunden.</small></div></>}
+   {screen==='profile'&&<><div className="page-title"><h1>Profil</h1><p>Sicher & respektvoll.</p></div><div className="profile-box"><div className="profile-avatar">L</div><h2>Leon</h2><p>Verifiziert ✓</p></div><div className="choice-list"><button>Sicherheit & Verifizierung ›</button><button>Dating-Präferenzen ›</button><button>Datenschutz ›</button><button>Blockieren & Melden ›</button></div></>}
+  </section>
+  <nav className="nav"><button className={screen==='home'?'active':''} onClick={()=>setScreen('home')}>⌂<span>Home</span></button><button className={['time','type','matches','experiences','event'].includes(screen)?'active':''} onClick={()=>setScreen('matches')}>⌕<span>Entdecken</span></button><button onClick={()=>flash('Chats sind nach Match kostenlos')}>♡<span>Chats</span></button><button className={screen==='profile'?'active':''} onClick={()=>setScreen('profile')}>♙<span>Profil</span></button></nav>
+  {checkout&&<div className="modal"><div><Logo compact/><h2>{checkout.label}</h2><p>{checkout.amount===19?'19,00 €':'Credit-Paket kaufen'}</p><button className="apple" onClick={confirmPay}> Pay</button><button className="card" onClick={confirmPay}>Mit Karte bezahlen</button><button className="cancel" onClick={()=>setCheckout(null)}>Abbrechen</button><small>Demo-Zahlung – es wird kein echtes Geld abgebucht.</small></div></div>}
+  {toast&&<div className="toast">{toast}</div>}
+ </main></div>
 }
-
-function App() {
-  const [tab, setTab] = useState('discover')
-  const [index, setIndex] = useState(0)
-  const [credits, setCredits] = useState(12)
-  const [toast, setToast] = useState('')
-  const [liked, setLiked] = useState([])
-  const profile = profiles[index % profiles.length]
-
-  const title = useMemo(() => ({ discover: 'Discover', events: 'Events', wallet: 'Wallet', profile: 'You' }[tab]), [tab])
-
-  function flash(message) {
-    setToast(message)
-    window.setTimeout(() => setToast(''), 1700)
-  }
-
-  function next() {
-    setIndex((v) => (v + 1) % profiles.length)
-  }
-
-  function like() {
-    if (credits < 1) return flash('Keine Credits mehr – Wallet öffnen.')
-    setCredits((v) => v - 1)
-    setLiked((v) => [...new Set([...v, profile.name])])
-    flash(`${profile.name} geliked · 1 Credit`)
-    next()
-  }
-
-  return (
-    <div className="app-shell">
-      <div className="ambient ambient-a" />
-      <div className="ambient ambient-b" />
-      <main className="phone">
-        <header className="topbar">
-          <Logo />
-          <button className="credit-pill" onClick={() => setTab('wallet')}><span>●</span>{credits} Credits</button>
-        </header>
-
-        <section className="content">
-          <div className="section-head">
-            <div>
-              <p className="eyebrow">ONE:2:US</p>
-              <h1>{title}</h1>
-            </div>
-            {tab === 'discover' && <button className="icon-btn" aria-label="Filter">☷</button>}
-          </div>
-
-          {tab === 'discover' && (
-            <div className="discover-view">
-              <div className="promise"><span>✦</span><div><b>Weniger swipen. Besser treffen.</b><small>3 kuratierte Vorschläge pro Tag.</small></div></div>
-              <article className="profile-card">
-                <div className="profile-visual">
-                  <div className="big-emoji">{profile.emoji}</div>
-                  <div className="match-badge">{profile.match}% MATCH</div>
-                  <div className="photo-copy">
-                    <h2>{profile.name}, {profile.age}</h2>
-                    <p>⌖ {profile.city}</p>
-                  </div>
-                </div>
-                <div className="profile-info">
-                  <p className="quote">“{profile.quote}”</p>
-                  <div className="tags">{profile.tags.map((tag) => <span key={tag}>{tag}</span>)}</div>
-                </div>
-              </article>
-              <div className="actions">
-                <button className="pass" onClick={next}>×</button>
-                <button className="super" onClick={() => flash('Boost vorgemerkt · 2 Credits')}>✦</button>
-                <button className="like" onClick={like}>♥</button>
-              </div>
-              <p className="microcopy">Like = 1 Credit · Match & Chat danach kostenlos</p>
-            </div>
-          )}
-
-          {tab === 'events' && (
-            <div className="list-view">
-              <div className="hero-card event-hero"><span>REAL LIFE &gt; SMALL TALK</span><h2>Dates beginnen nicht im Chat.</h2><p>Kuratiert, lokal und bewusst klein.</p></div>
-              {events.map((event) => (
-                <button className="event-row" key={event.title} onClick={() => flash(`${event.title} ausgewählt`)}>
-                  <div className="date-box"><b>{event.day}</b><span>{event.month}</span></div>
-                  <div className="event-copy"><b>{event.title}</b><span>{event.meta}</span></div>
-                  <strong>{event.price}</strong>
-                </button>
-              ))}
-            </div>
-          )}
-
-          {tab === 'wallet' && (
-            <div className="list-view">
-              <div className="wallet-card"><p>Dein Guthaben</p><div><strong>{credits}</strong><span>Credits</span></div><small>Keine Abos. Kein Kleingedrucktes.</small></div>
-              <div className="price-grid">
-                {[['10', '9,90 €'], ['25', '19,90 €'], ['60', '39,90 €']].map(([amount, price], i) => (
-                  <button key={amount} className={i === 1 ? 'price active' : 'price'} onClick={() => { setCredits((v) => v + Number(amount)); flash(`${amount} Demo-Credits hinzugefügt`) }}>
-                    {i === 1 && <em>POPULAR</em>}<b>{amount}</b><span>Credits</span><strong>{price}</strong>
-                  </button>
-                ))}
-              </div>
-              <div className="costs"><h3>Was kostet was?</h3><p><span>♥ Like senden</span><b>1 Credit</b></p><p><span>✦ Profil boosten</span><b>2 Credits</b></p><p><span>💬 Chat nach Match</span><b>0 Credits</b></p></div>
-            </div>
-          )}
-
-          {tab === 'profile' && (
-            <div className="list-view">
-              <div className="user-card"><div className="avatar">YOU</div><h2>Dein Profil</h2><p>Frankfurt · verifiziert</p><button onClick={() => flash('Profil-Editor folgt im nächsten Sprint')}>Profil bearbeiten</button></div>
-              <div className="stats"><div><b>{liked.length}</b><span>Likes heute</span></div><div><b>3</b><span>Matches</span></div><div><b>1</b><span>Event</span></div></div>
-              <div className="settings"><button>Dating-Präferenzen <span>›</span></button><button>Sicherheit & Verifizierung <span>›</span></button><button>Datenschutz <span>›</span></button></div>
-            </div>
-          )}
-        </section>
-
-        <nav className="nav">
-          <button className={tab === 'discover' ? 'active' : ''} onClick={() => setTab('discover')}><span>◇</span>Discover</button>
-          <button className={tab === 'events' ? 'active' : ''} onClick={() => setTab('events')}><span>◉</span>Events</button>
-          <button className={tab === 'wallet' ? 'active' : ''} onClick={() => setTab('wallet')}><span>◫</span>Wallet</button>
-          <button className={tab === 'profile' ? 'active' : ''} onClick={() => setTab('profile')}><span>○</span>You</button>
-        </nav>
-        {toast && <div className="toast">{toast}</div>}
-      </main>
-    </div>
-  )
-}
-
-export default App

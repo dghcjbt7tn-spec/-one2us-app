@@ -1,4 +1,4 @@
-name: Deploy ONE:2:US to GitHub Pages
+name: Deploy One:2:Us to GitHub Pages
 
 on:
   push:
@@ -27,6 +27,9 @@ jobs:
       - name: Install dependencies
         run: npm install
       - name: Build
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
         run: npm run build
       - name: Setup Pages
         uses: actions/configure-pages@v5

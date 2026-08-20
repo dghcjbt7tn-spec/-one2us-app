@@ -45,9 +45,25 @@ export async function saveProfile(profile) {
   if (!backendConfigured) throw new Error('Backend noch nicht konfiguriert')
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) throw new Error('Nicht angemeldet')
-  const { data, error } = await supabase.from('profiles').upsert({ id: user.id, ...profile }).select().single()
+  const { data, error } = await supabase.from('profiles').upsert({ id: user.id, ...profile, updated_at: new Date().toISOString() }).select().single()
   if (error) throw error
   return data
+}
+
+export async function listProfiles(limit = 12) {
+  if (!backendConfigured) return []
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return []
+  const { data, error } = await supabase.from('profiles').select('id,display_name,birthdate,city,bio,avatar_url,verified').neq('id', user.id).limit(limit)
+  if (error) throw error
+  return data || []
+}
+
+export async function listEvents(limit = 20) {
+  if (!backendConfigured) return []
+  const { data, error } = await supabase.from('events').select('*').order('starts_at').limit(limit)
+  if (error) throw error
+  return data || []
 }
 
 export async function loadMessages(matchId) {

@@ -17,14 +17,21 @@ Deno.serve(async (req) => {
     const session = event.data.object as Stripe.Checkout.Session
     const userId = session.metadata?.user_id
     const kind = session.metadata?.kind
+
     if (userId && kind === 'credits') {
       const credits = Number(session.metadata?.credits || 0)
       if (credits > 0) {
-        const { data: profile } = await supabase.from('profiles').select('credits').eq('id', userId).single()
-        await supabase.from('profiles').update({ credits: (profile?.credits || 0) + credits }).eq('id', userId)
-        await supabase.from('credit_transactions').insert({ user_id: userId, amount: credits, reason: 'stripe_purchase', stripe_checkout_session_id: session.id })
+        const { data: existing } = await supabase.from('credit_transactions').select('id').eq('stripe_checkout_session_id', session.id).maybeSingle()
+        if (!existing) {
+          const { error: txError } = await supabase.from('credit_transactions').insert({ user_id: userId, amount: credits, reason: 'stripe_purchase', stripe_checkout_session_id: session.id })
+          if (!txError) {
+            const { data: profile } = await supabase.from('profiles').select('credits').eq('id', userId).single()
+            await supabase.from('profiles').update({ credits: (profile?.credits || 0) + credits, updated_at: new Date().toISOString() }).eq('id', userId)
+          }
+        }
       }
     }
+
     if (userId && kind === 'event' && session.metadata?.event_id) {
       await supabase.from('event_bookings').upsert({
         event_id: session.metadata.event_id,

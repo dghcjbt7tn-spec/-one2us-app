@@ -66,6 +66,32 @@ export async function listEvents(limit = 20) {
   return data || []
 }
 
+export async function shareLiveLocation({ latitude, longitude, accuracy, visibility = 'matches', precise = false, minutes = 30 }) {
+  if (!backendConfigured) return null
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('Nicht angemeldet')
+  const expiresAt = new Date(Date.now() + minutes * 60000).toISOString()
+  const payload = { user_id: user.id, latitude, longitude, accuracy_m: Math.round(accuracy || 0), visibility, precise, expires_at: expiresAt, updated_at: new Date().toISOString() }
+  const { data, error } = await supabase.from('live_locations').upsert(payload).select().single()
+  if (error) throw error
+  return data
+}
+
+export async function stopLiveLocation() {
+  if (!backendConfigured) return
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return
+  const { error } = await supabase.from('live_locations').delete().eq('user_id', user.id)
+  if (error) throw error
+}
+
+export async function listVisibleLiveLocations() {
+  if (!backendConfigured) return []
+  const { data, error } = await supabase.from('live_locations').select('user_id,latitude,longitude,accuracy_m,visibility,precise,expires_at,updated_at,profiles(display_name,avatar_url)').gt('expires_at', new Date().toISOString())
+  if (error) throw error
+  return data || []
+}
+
 export async function loadMessages(matchId) {
   if (!backendConfigured) return []
   const { data, error } = await supabase.from('messages').select('*').eq('match_id', matchId).order('created_at')

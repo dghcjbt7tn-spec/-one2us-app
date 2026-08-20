@@ -37,10 +37,15 @@ create table if not exists public.events (
   starts_at timestamptz not null,
   city text,
   venue text,
+  latitude double precision,
+  longitude double precision,
   price_cents integer not null default 0,
   capacity integer,
   created_at timestamptz not null default now()
 );
+
+alter table public.events add column if not exists latitude double precision;
+alter table public.events add column if not exists longitude double precision;
 
 create table if not exists public.event_bookings (
   id uuid primary key default gen_random_uuid(),
@@ -61,12 +66,24 @@ create table if not exists public.credit_transactions (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.live_locations (
+  user_id uuid primary key references public.profiles(id) on delete cascade,
+  latitude double precision not null,
+  longitude double precision not null,
+  accuracy_m integer,
+  visibility text not null default 'matches' check (visibility in ('matches','friends')),
+  precise boolean not null default false,
+  expires_at timestamptz not null,
+  updated_at timestamptz not null default now()
+);
+
 alter table public.profiles enable row level security;
 alter table public.matches enable row level security;
 alter table public.messages enable row level security;
 alter table public.events enable row level security;
 alter table public.event_bookings enable row level security;
 alter table public.credit_transactions enable row level security;
+alter table public.live_locations enable row level security;
 
 create policy "profiles readable by signed in users" on public.profiles for select to authenticated using (true);
 create policy "users update own profile" on public.profiles for update to authenticated using (auth.uid() = id) with check (auth.uid() = id);
@@ -79,6 +96,15 @@ create policy "participants send messages" on public.messages for insert to auth
 create policy "events are public to signed in users" on public.events for select to authenticated using (true);
 create policy "users read own bookings" on public.event_bookings for select to authenticated using (auth.uid()=user_id);
 create policy "users read own transactions" on public.credit_transactions for select to authenticated using (auth.uid()=user_id);
+
+create policy "users manage own live location" on public.live_locations for all to authenticated using (auth.uid()=user_id) with check (auth.uid()=user_id);
+create policy "matched users can read live locations" on public.live_locations for select to authenticated using (
+  expires_at > now() and exists (
+    select 1 from public.matches m
+    where m.status='active'
+      and ((m.user_a=auth.uid() and m.user_b=live_locations.user_id) or (m.user_b=auth.uid() and m.user_a=live_locations.user_id))
+  )
+);
 
 create or replace function public.handle_new_user() returns trigger language plpgsql security definer set search_path = public as $$
 begin

@@ -3,6 +3,30 @@
 
 create extension if not exists pgcrypto;
 
+-- Compatibility with the first schema version, which used user_1/user_2.
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema='public' and table_name='matches' and column_name='user_1'
+  ) and not exists (
+    select 1 from information_schema.columns
+    where table_schema='public' and table_name='matches' and column_name='user_a'
+  ) then
+    alter table public.matches rename column user_1 to user_a;
+  end if;
+
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema='public' and table_name='matches' and column_name='user_2'
+  ) and not exists (
+    select 1 from information_schema.columns
+    where table_schema='public' and table_name='matches' and column_name='user_b'
+  ) then
+    alter table public.matches rename column user_2 to user_b;
+  end if;
+end $$;
+
 create table if not exists public.likes (
   id uuid primary key default gen_random_uuid(),
   sender_id uuid not null references public.profiles(id) on delete cascade,

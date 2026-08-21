@@ -54,7 +54,7 @@ export async function listProfiles(limit = 24) {
   if (!backendConfigured) return []
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return []
-  const { data, error } = await supabase.from('profiles').select('id,display_name,birthdate,city,bio,avatar_url,verified').neq('id', user.id).limit(limit)
+  const { data, error } = await supabase.from('profiles').select('id,username,display_name,birth_date,gender,interested_in,bio,city,latitude,longitude,avatar_url,verified').neq('id', user.id).limit(limit)
   if (error) throw error
   return data || []
 }

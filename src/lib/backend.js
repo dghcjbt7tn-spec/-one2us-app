@@ -151,13 +151,21 @@ export async function startCheckout(kind, quantity) {
   if (!backendConfigured) throw new Error('Backend noch nicht konfiguriert')
   const { data: { session } } = await supabase.auth.getSession()
   if (!session) throw new Error('Bitte zuerst anmelden')
-  const endpoint = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/create-checkout-session`
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-    body: JSON.stringify({ kind, quantity, successUrl: window.location.href, cancelUrl: window.location.href })
+
+  const returnUrl = new URL(window.location.href)
+  returnUrl.searchParams.delete('payment')
+  returnUrl.searchParams.delete('session_id')
+
+  const { data, error } = await supabase.functions.invoke('create-checkout-session', {
+    body: {
+      kind,
+      quantity,
+      successUrl: returnUrl.toString(),
+      cancelUrl: returnUrl.toString()
+    }
   })
-  const payload = await response.json()
-  if (!response.ok) throw new Error(payload.error || 'Checkout konnte nicht gestartet werden')
-  window.location.href = payload.url
+
+  if (error) throw new Error(error.message || 'Checkout konnte nicht gestartet werden')
+  if (!data?.url) throw new Error(data?.error || 'Stripe Checkout URL fehlt')
+  window.location.assign(data.url)
 }

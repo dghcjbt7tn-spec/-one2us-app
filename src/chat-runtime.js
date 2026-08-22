@@ -10,10 +10,23 @@ if (backendConfigured && supabase) {
   let presenceChannel = null
   let messagesChannel = null
   let refreshTimer = null
+  let domTimer = null
 
   const debounceRefresh = () => {
     clearTimeout(refreshTimer)
-    refreshTimer = setTimeout(refreshUnread, 180)
+    refreshTimer = setTimeout(refreshUnread, 250)
+  }
+
+  const scheduleRender = () => {
+    if (domTimer) return
+    domTimer = setTimeout(() => {
+      domTimer = null
+      renderEnhancements()
+    }, 120)
+  }
+
+  const setText = (el, value) => {
+    if (el && el.textContent !== value) el.textContent = value
   }
 
   const getMatchName = match => match?.person?.display_name || 'Match'
@@ -32,9 +45,9 @@ if (backendConfigured && supabase) {
         }
       }))
       unreadByMatch = new Map(entries)
-      renderEnhancements()
+      scheduleRender()
     } catch {
-      // UI remains functional even if the badge refresh fails temporarily.
+      // UI remains functional even if unread refresh fails temporarily.
     }
   }
 
@@ -46,7 +59,7 @@ if (backendConfigured && supabase) {
     let badge = chatsButton.querySelector('.chat-nav-badge')
     const total = [...unreadByMatch.values()].reduce((sum, n) => sum + n, 0)
     if (!total) {
-      badge?.remove()
+      if (badge) badge.remove()
       return
     }
     if (!badge) {
@@ -54,7 +67,7 @@ if (backendConfigured && supabase) {
       badge.className = 'chat-nav-badge'
       chatsButton.appendChild(badge)
     }
-    badge.textContent = total > 99 ? '99+' : String(total)
+    setText(badge, total > 99 ? '99+' : String(total))
   }
 
   function renderMatchBadges() {
@@ -65,7 +78,7 @@ if (backendConfigured && supabase) {
       const count = unreadByMatch.get(match.id) || 0
       let badge = btn.querySelector('.match-unread-badge')
       if (!count) {
-        badge?.remove()
+        if (badge) badge.remove()
         return
       }
       if (!badge) {
@@ -73,13 +86,14 @@ if (backendConfigured && supabase) {
         badge.className = 'match-unread-badge'
         btn.appendChild(badge)
       }
-      badge.textContent = count > 99 ? '99+' : String(count)
+      setText(badge, count > 99 ? '99+' : String(count))
     })
   }
 
   function resolveOpenMatch(head) {
     const name = head.querySelector('h2')?.textContent?.trim()
-    const avatar = head.querySelector('img')?.currentSrc || head.querySelector('img')?.src || ''
+    const avatarEl = head.querySelector('img')
+    const avatar = avatarEl?.currentSrc || avatarEl?.src || ''
 
     let match = matches.find(m => {
       const person = m?.person
@@ -89,8 +103,6 @@ if (backendConfigured && supabase) {
       return name && getMatchName(m) === name
     })
 
-    // In the current 1:1 prototype there is often only one real match.
-    // This fallback avoids losing presence just because display names/avatars changed.
     if (!match && matches.length === 1) match = matches[0]
     return match || null
   }
@@ -105,15 +117,17 @@ if (backendConfigured && supabase) {
     const otherId = match?.person?.id
     if (!otherId || otherId === currentUser?.id) return
 
-    head.dataset.personId = otherId
-    status.classList.remove('presence-online', 'presence-offline')
-    if (onlineUsers.has(otherId)) {
-      status.textContent = 'online'
-      status.classList.add('presence-online')
-    } else {
-      status.textContent = lastSeen.has(otherId) ? 'zuletzt online vor kurzem' : 'offline'
-      status.classList.add('presence-offline')
+    if (head.dataset.personId !== otherId) head.dataset.personId = otherId
+
+    const online = onlineUsers.has(otherId)
+    const nextText = online ? 'online' : (lastSeen.has(otherId) ? 'zuletzt online vor kurzem' : 'offline')
+    const nextClass = online ? 'presence-online' : 'presence-offline'
+
+    if (!status.classList.contains(nextClass) || status.classList.length > 1) {
+      status.classList.remove('presence-online', 'presence-offline')
+      status.classList.add(nextClass)
     }
+    setText(status, nextText)
   }
 
   function renderNotificationControl() {
@@ -166,25 +180,25 @@ if (backendConfigured && supabase) {
       .on('presence', { event: 'sync' }, () => {
         const state = presenceChannel.presenceState()
         onlineUsers = new Set(Object.keys(state))
-        renderEnhancements()
+        scheduleRender()
       })
       .on('presence', { event: 'join' }, ({ key }) => {
         if (key) onlineUsers.add(key)
-        renderEnhancements()
+        scheduleRender()
       })
       .on('presence', { event: 'leave' }, ({ key }) => {
         if (key) {
           onlineUsers.delete(key)
           lastSeen.set(key, Date.now())
         }
-        renderEnhancements()
+        scheduleRender()
       })
       .subscribe(async status => {
         if (status === 'SUBSCRIBED') {
           await presenceChannel.track({ user_id: currentUser.id, online_at: new Date().toISOString() })
           const state = presenceChannel.presenceState()
           onlineUsers = new Set(Object.keys(state))
-          renderEnhancements()
+          scheduleRender()
         }
       })
   }
@@ -199,8 +213,11 @@ if (backendConfigured && supabase) {
       .subscribe()
   }
 
-  const domObserver = new MutationObserver(() => renderEnhancements())
+  // React changes the screen DOM. Observe those changes, but debounce heavily and
+  // only write to DOM when values actually changed. This prevents render loops on iOS Safari.
+  const domObserver = new MutationObserver(() => scheduleRender())
   domObserver.observe(document.documentElement, { childList: true, subtree: true })
+
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') debounceRefresh()
   })
@@ -212,7 +229,7 @@ if (backendConfigured && supabase) {
     await refreshUnread()
     setupPresence()
     setupMessageObserver()
-    renderEnhancements()
+    scheduleRender()
   }
 
   supabase.auth.getSession().then(({ data }) => start(data.session))
@@ -225,6 +242,6 @@ if (backendConfigured && supabase) {
     presenceChannel?.unsubscribe?.()
     messagesChannel?.unsubscribe?.()
     if (session) start(session)
-    else renderEnhancements()
+    else scheduleRender()
   })
 }

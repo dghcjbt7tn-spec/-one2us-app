@@ -77,23 +77,41 @@ if (backendConfigured && supabase) {
     })
   }
 
+  function resolveOpenMatch(head) {
+    const name = head.querySelector('h2')?.textContent?.trim()
+    const avatar = head.querySelector('img')?.currentSrc || head.querySelector('img')?.src || ''
+
+    let match = matches.find(m => {
+      const person = m?.person
+      if (!person) return false
+      if (person.id && head.dataset.personId === person.id) return true
+      if (person.avatar_url && avatar && avatar.includes(person.avatar_url)) return true
+      return name && getMatchName(m) === name
+    })
+
+    // In the current 1:1 prototype there is often only one real match.
+    // This fallback avoids losing presence just because display names/avatars changed.
+    if (!match && matches.length === 1) match = matches[0]
+    return match || null
+  }
+
   function renderChatPresence() {
     const head = document.querySelector('.chat-head')
     if (!head) return
-    const name = head.querySelector('h2')?.textContent?.trim()
     const status = head.querySelector('div > span')
-    if (!name || !status) return
+    if (!status) return
 
-    const match = matches.find(m => getMatchName(m) === name)
+    const match = resolveOpenMatch(head)
     const otherId = match?.person?.id
-    if (!otherId) return
+    if (!otherId || otherId === currentUser?.id) return
 
+    head.dataset.personId = otherId
     status.classList.remove('presence-online', 'presence-offline')
     if (onlineUsers.has(otherId)) {
       status.textContent = 'online'
       status.classList.add('presence-online')
-    } else if (lastSeen.has(otherId)) {
-      status.textContent = 'zuletzt online vor kurzem'
+    } else {
+      status.textContent = lastSeen.has(otherId) ? 'zuletzt online vor kurzem' : 'offline'
       status.classList.add('presence-offline')
     }
   }
@@ -164,6 +182,9 @@ if (backendConfigured && supabase) {
       .subscribe(async status => {
         if (status === 'SUBSCRIBED') {
           await presenceChannel.track({ user_id: currentUser.id, online_at: new Date().toISOString() })
+          const state = presenceChannel.presenceState()
+          onlineUsers = new Set(Object.keys(state))
+          renderEnhancements()
         }
       })
   }

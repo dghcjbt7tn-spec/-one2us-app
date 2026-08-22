@@ -1,0 +1,9 @@
+.chat-box{display:flex;flex-direction:column;gap:14px;min-height:440px;padding:14px 0 8px}
+.bubble{position:relative;max-width:78%;padding:14px 16px;border-radius:22px;font-size:16px;line-height:1.4;box-shadow:0 10px 28px rgba(0,0,0,.18)}
+.bubble.me{align-self:flex-end;background:#caff00;color:#080a0e;border-bottom-right-radius:7px}
+.bubble.them{align-self:flex-start;background:#1a1d22;color:#f7f7f7;border:1px solid #30343a;border-bottom-left-radius:7px}
+.chat-input{position:sticky;bottom:86px;z-index:5;display:grid;grid-template-columns:1fr 52px;gap:10px;margin-top:18px;padding:8px 0 4px;background:linear-gradient(180deg,rgba(8,10,14,0),#080a0e 24%)}
+.chat-input input{height:54px;border:1px solid #343941;background:#15181d;color:#fff;border-radius:18px;padding:0 18px;font-size:16px;outline:none}
+.chat-input input:focus{border-color:#caff00;box-shadow:0 0 0 2px rgba(202,255,0,.12)}
+.chat-input button{width:52px;height:52px;border:0;border-radius:18px;background:#caff00;color:#080a0e;font-size:22px;font-weight:950;box-shadow:0 8px 22px rgba(202,255,0,.12)}
+@media(max-width:520px){.bubble{max-width:84%;font-size:16px}.chat-box{min-height:470px}.chat-input{bottom:82px}}

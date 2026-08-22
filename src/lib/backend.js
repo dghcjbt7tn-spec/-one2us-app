@@ -135,7 +135,7 @@ export async function loadMessages(matchId) {
 
 export function subscribeMessages(matchId, callback) {
   if (!backendConfigured || !matchId) return { unsubscribe() {} }
-  const channel = supabase.channel(`messages-${matchId}`).on('postgres_changes',{event:'INSERT',schema:'public',table:'messages',filter:`match_id=eq.${matchId}`},payload=>callback(payload.new)).subscribe()
+  const channel = supabase.channel(`messages-${matchId}`).on('postgres_changes',{event:'*',schema:'public',table:'messages',filter:`match_id=eq.${matchId}`},payload=>{if(payload.new?.id)callback(payload.new)}).subscribe()
   return { unsubscribe:()=>supabase.removeChannel(channel) }
 }
 
@@ -145,6 +145,27 @@ export async function sendMessage(matchId, body) {
   const { data, error } = await supabase.from('messages').insert({ match_id: matchId, sender_id: user.id, body }).select().single()
   if (error) throw error
   return data
+}
+
+export async function markMessagesRead(matchId) {
+  if (!backendConfigured || !matchId) return
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return
+  const { error } = await supabase.from('messages').update({ read_at: new Date().toISOString() }).eq('match_id', matchId).neq('sender_id', user.id).is('read_at', null)
+  if (error) throw error
+}
+
+export function createTypingChannel(matchId, userId, onTyping) {
+  if (!backendConfigured || !matchId || !userId) return { sendTyping() {}, unsubscribe() {} }
+  const channel = supabase.channel(`typing-${matchId}`, { config: { broadcast: { self: false } } })
+    .on('broadcast', { event: 'typing' }, ({ payload }) => {
+      if (payload?.user_id && payload.user_id !== userId) onTyping?.(!!payload.typing)
+    })
+    .subscribe()
+  return {
+    sendTyping(typing) { channel.send({ type: 'broadcast', event: 'typing', payload: { user_id: userId, typing: !!typing } }) },
+    unsubscribe() { supabase.removeChannel(channel) }
+  }
 }
 
 export async function startCheckout(kind, quantity) {

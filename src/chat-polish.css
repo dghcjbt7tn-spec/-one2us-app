@@ -1,11 +1,9 @@
-.chat-box{display:flex;flex-direction:column;gap:14px;min-height:440px;padding:14px 0 8px}
-.bubble{position:relative;max-width:78%;padding:14px 16px;border-radius:22px;font-size:16px;line-height:1.4;box-shadow:0 10px 28px rgba(0,0,0,.18);overflow-wrap:anywhere}
-/* Die eigene Nachricht ist für den eingeloggten Schreiber IMMER rechts und in One:2:Us-Lime. */
-.bubble.me{align-self:flex-end;margin-left:auto;background:#caff00;color:#080a0e;border:1px solid #caff00;border-bottom-right-radius:7px}
-/* Nachrichten des Gegenübers stehen IMMER links und bleiben dunkel. */
-.bubble.them{align-self:flex-start;margin-right:auto;background:#1a1d22;color:#f7f7f7;border:1px solid #30343a;border-bottom-left-radius:7px}
-.chat-input{position:sticky;bottom:86px;z-index:5;display:grid;grid-template-columns:1fr 52px;gap:10px;margin-top:18px;padding:8px 0 4px;background:linear-gradient(180deg,rgba(8,10,14,0),#080a0e 24%)}
-.chat-input input{height:54px;border:1px solid #343941;background:#15181d;color:#fff;border-radius:18px;padding:0 18px;font-size:16px;outline:none}
-.chat-input input:focus{border-color:#caff00;box-shadow:0 0 0 2px rgba(202,255,0,.12)}
-.chat-input button{width:52px;height:52px;border:0;border-radius:18px;background:#caff00;color:#080a0e;font-size:22px;font-weight:950;box-shadow:0 8px 22px rgba(202,255,0,.12)}
-@media(max-width:520px){.bubble{max-width:84%;font-size:16px}.chat-box{min-height:470px}.chat-input{bottom:82px}}
+.chat-head{display:flex;align-items:center;gap:12px;padding:4px 0 14px;border-bottom:1px solid #242831;position:sticky;top:0;z-index:4;background:#080a0e}
+.chat-head img{width:46px;height:46px;border-radius:50%;object-fit:cover;border:1px solid #343941}.chat-head div{min-width:0}.chat-head h2{margin:0;color:#fff;font-size:20px;line-height:1.1}.chat-head span{display:block;margin-top:4px;color:#8f96a3;font-size:13px}.chat-back{width:38px;height:38px;border:0;background:#15181d;color:#fff;border-radius:50%;font-size:30px;line-height:1;display:grid;place-items:center;padding:0 0 3px}
+.chat-box{display:flex;flex-direction:column;gap:12px;min-height:440px;padding:18px 0 8px}
+.bubble{position:relative;max-width:78%;padding:11px 14px 7px;border-radius:22px;font-size:16px;line-height:1.4;box-shadow:0 10px 28px rgba(0,0,0,.18);overflow-wrap:anywhere}
+.bubble.me{align-self:flex-end;margin-left:auto;background:#caff00;color:#080a0e;border:1px solid #caff00;border-bottom-right-radius:7px}.bubble.them{align-self:flex-start;margin-right:auto;background:#1a1d22;color:#f7f7f7;border:1px solid #30343a;border-bottom-left-radius:7px}
+.bubble-text{white-space:pre-wrap}.bubble-meta{display:flex;align-items:center;justify-content:flex-end;gap:5px;margin-top:4px;font-size:11px;line-height:1;color:rgba(8,10,14,.62)}.bubble.them .bubble-meta{color:#8f96a3}.read{font-weight:800;letter-spacing:-2px}.read.read-on{color:#557000}
+.typing-bubble{align-self:flex-start;display:flex;align-items:center;gap:4px;background:#1a1d22;border:1px solid #30343a;border-radius:18px 18px 18px 6px;padding:11px 14px}.typing-bubble i{width:6px;height:6px;border-radius:50%;background:#8f96a3;animation:typingDot 1s infinite ease-in-out}.typing-bubble i:nth-child(2){animation-delay:.14s}.typing-bubble i:nth-child(3){animation-delay:.28s}@keyframes typingDot{0%,60%,100%{transform:translateY(0);opacity:.55}30%{transform:translateY(-4px);opacity:1}}
+.chat-input{position:sticky;bottom:86px;z-index:5;display:grid;grid-template-columns:1fr 52px;gap:10px;margin-top:18px;padding:8px 0 4px;background:linear-gradient(180deg,rgba(8,10,14,0),#080a0e 24%)}.chat-input input{height:54px;border:1px solid #343941;background:#15181d;color:#fff;border-radius:18px;padding:0 18px;font-size:16px;outline:none}.chat-input input:focus{border-color:#caff00;box-shadow:0 0 0 2px rgba(202,255,0,.12)}.chat-input button{width:52px;height:52px;border:0;border-radius:18px;background:#caff00;color:#080a0e;font-size:22px;font-weight:950;box-shadow:0 8px 22px rgba(202,255,0,.12)}
+@media(max-width:520px){.bubble{max-width:84%;font-size:16px}.chat-box{min-height:470px}.chat-input{bottom:82px}.chat-head h2{font-size:19px}}

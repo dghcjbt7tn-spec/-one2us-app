@@ -7,29 +7,31 @@ if (backendConfigured && supabase) {
   let unreadByMatch = new Map()
   let onlineUsers = new Set()
   let lastSeen = new Map()
+  let activeMatchId = null
   let presenceChannel = null
   let messagesChannel = null
   let refreshTimer = null
   let domTimer = null
+  let heartbeatTimer = null
+
+  const getMatchName = match => match?.person?.display_name || 'Match'
 
   const debounceRefresh = () => {
     clearTimeout(refreshTimer)
-    refreshTimer = setTimeout(refreshUnread, 250)
+    refreshTimer = setTimeout(refreshUnread, 300)
   }
 
-  const scheduleRender = () => {
-    if (domTimer) return
+  const scheduleRender = (delay = 100) => {
+    if (domTimer) clearTimeout(domTimer)
     domTimer = setTimeout(() => {
       domTimer = null
       renderEnhancements()
-    }, 120)
+    }, delay)
   }
 
   const setText = (el, value) => {
     if (el && el.textContent !== value) el.textContent = value
   }
-
-  const getMatchName = match => match?.person?.display_name || 'Match'
 
   async function refreshUnread() {
     if (!currentUser) return
@@ -47,7 +49,7 @@ if (backendConfigured && supabase) {
       unreadByMatch = new Map(entries)
       scheduleRender()
     } catch {
-      // UI remains functional even if unread refresh fails temporarily.
+      // Chat itself must remain usable even if badge refresh fails.
     }
   }
 
@@ -59,7 +61,7 @@ if (backendConfigured && supabase) {
     let badge = chatsButton.querySelector('.chat-nav-badge')
     const total = [...unreadByMatch.values()].reduce((sum, n) => sum + n, 0)
     if (!total) {
-      if (badge) badge.remove()
+      badge?.remove()
       return
     }
     if (!badge) {
@@ -75,10 +77,13 @@ if (backendConfigured && supabase) {
     buttons.forEach((btn, index) => {
       const match = matches[index]
       if (!match) return
+      btn.dataset.matchId = match.id
+      if (match.person?.id) btn.dataset.personId = match.person.id
+
       const count = unreadByMatch.get(match.id) || 0
       let badge = btn.querySelector('.match-unread-badge')
       if (!count) {
-        if (badge) badge.remove()
+        badge?.remove()
         return
       }
       if (!badge) {
@@ -91,39 +96,53 @@ if (backendConfigured && supabase) {
   }
 
   function resolveOpenMatch(head) {
+    if (activeMatchId) {
+      const byId = matches.find(m => m.id === activeMatchId)
+      if (byId) return byId
+    }
+
+    const savedPersonId = head.dataset.personId
+    if (savedPersonId) {
+      const byPerson = matches.find(m => m.person?.id === savedPersonId)
+      if (byPerson) return byPerson
+    }
+
     const name = head.querySelector('h2')?.textContent?.trim()
     const avatarEl = head.querySelector('img')
     const avatar = avatarEl?.currentSrc || avatarEl?.src || ''
-
-    let match = matches.find(m => {
+    const resolved = matches.find(m => {
       const person = m?.person
       if (!person) return false
-      if (person.id && head.dataset.personId === person.id) return true
       if (person.avatar_url && avatar && avatar.includes(person.avatar_url)) return true
       return name && getMatchName(m) === name
     })
 
-    if (!match && matches.length === 1) match = matches[0]
-    return match || null
+    if (resolved) return resolved
+    return matches.length === 1 ? matches[0] : null
   }
 
   function renderChatPresence() {
     const head = document.querySelector('.chat-head')
-    if (!head) return
+    if (!head || !currentUser) return
     const status = head.querySelector('div > span')
     if (!status) return
 
+    // The React typing indicator has priority over presence.
+    if (status.textContent?.includes('schreibt gerade')) return
+
     const match = resolveOpenMatch(head)
     const otherId = match?.person?.id
-    if (!otherId || otherId === currentUser?.id) return
+    if (!otherId || otherId === currentUser.id) return
 
-    if (head.dataset.personId !== otherId) head.dataset.personId = otherId
+    activeMatchId = match.id
+    head.dataset.matchId = match.id
+    head.dataset.personId = otherId
 
     const online = onlineUsers.has(otherId)
     const nextText = online ? 'online' : (lastSeen.has(otherId) ? 'zuletzt online vor kurzem' : 'offline')
     const nextClass = online ? 'presence-online' : 'presence-offline'
 
-    if (!status.classList.contains(nextClass) || status.classList.length > 1) {
+    if (!status.classList.contains(nextClass)) {
       status.classList.remove('presence-online', 'presence-offline')
       status.classList.add(nextClass)
     }
@@ -168,39 +187,59 @@ if (backendConfigured && supabase) {
     try {
       new Notification(`One:2:Us · ${sender}`, { body, tag: `one2us-${message.match_id}` })
     } catch {
-      // Some iOS/browser contexts do not permit page-created notifications.
+      // iOS may reject page-created notifications in some contexts.
+    }
+  }
+
+  function syncPresenceState() {
+    if (!presenceChannel) return
+    const state = presenceChannel.presenceState()
+    onlineUsers = new Set(Object.keys(state || {}))
+    scheduleRender(50)
+  }
+
+  async function trackPresence() {
+    if (!presenceChannel || !currentUser || document.visibilityState === 'hidden') return
+    try {
+      await presenceChannel.track({
+        user_id: currentUser.id,
+        online_at: new Date().toISOString(),
+        visible: true
+      })
+    } catch {
+      // Presence is an enhancement only; never block chat functionality.
     }
   }
 
   function setupPresence() {
     presenceChannel?.unsubscribe?.()
-    presenceChannel = supabase.channel('one2us-user-presence', {
+    clearInterval(heartbeatTimer)
+
+    presenceChannel = supabase.channel('one2us-user-presence-v2', {
       config: { presence: { key: currentUser.id } }
     })
-      .on('presence', { event: 'sync' }, () => {
-        const state = presenceChannel.presenceState()
-        onlineUsers = new Set(Object.keys(state))
-        scheduleRender()
-      })
+      .on('presence', { event: 'sync' }, syncPresenceState)
       .on('presence', { event: 'join' }, ({ key }) => {
         if (key) onlineUsers.add(key)
-        scheduleRender()
+        scheduleRender(50)
       })
       .on('presence', { event: 'leave' }, ({ key }) => {
         if (key) {
           onlineUsers.delete(key)
           lastSeen.set(key, Date.now())
         }
-        scheduleRender()
+        scheduleRender(50)
       })
       .subscribe(async status => {
         if (status === 'SUBSCRIBED') {
-          await presenceChannel.track({ user_id: currentUser.id, online_at: new Date().toISOString() })
-          const state = presenceChannel.presenceState()
-          onlineUsers = new Set(Object.keys(state))
-          scheduleRender()
+          await trackPresence()
+          syncPresenceState()
         }
       })
+
+    // A lightweight heartbeat makes iOS/Safari presence much more reliable
+    // after app switching without touching the React render tree.
+    heartbeatTimer = setInterval(trackPresence, 20000)
   }
 
   function setupMessageObserver() {
@@ -213,15 +252,35 @@ if (backendConfigured && supabase) {
       .subscribe()
   }
 
-  // React changes the screen DOM. Observe those changes, but debounce heavily and
-  // only write to DOM when values actually changed. This prevents render loops on iOS Safari.
-  const domObserver = new MutationObserver(() => scheduleRender())
-  domObserver.observe(document.documentElement, { childList: true, subtree: true })
+  // We only observe additions/removals of React screen nodes. Rendering is debounced
+  // and idempotent, so our own text/class changes cannot create a feedback loop.
+  const domObserver = new MutationObserver(mutations => {
+    if (mutations.some(m => m.addedNodes.length || m.removedNodes.length)) scheduleRender(140)
+  })
+  domObserver.observe(document.getElementById('root') || document.body, { childList: true, subtree: true })
+
+  document.addEventListener('click', event => {
+    const matchButton = event.target.closest?.('.match-list > button')
+    if (matchButton?.dataset?.matchId) activeMatchId = matchButton.dataset.matchId
+
+    const chatsNav = event.target.closest?.('nav.nav.five button')
+    if (chatsNav?.querySelector('span')?.textContent?.trim() === 'Chats') activeMatchId = null
+
+    scheduleRender(120)
+  }, true)
 
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') debounceRefresh()
+    if (document.visibilityState === 'visible') {
+      trackPresence()
+      debounceRefresh()
+      scheduleRender(80)
+    }
   })
-  window.addEventListener('focus', debounceRefresh)
+  window.addEventListener('focus', () => {
+    trackPresence()
+    debounceRefresh()
+    scheduleRender(80)
+  })
 
   async function start(session) {
     currentUser = session?.user || null
@@ -239,8 +298,10 @@ if (backendConfigured && supabase) {
     unreadByMatch = new Map()
     matches = []
     onlineUsers = new Set()
+    activeMatchId = null
     presenceChannel?.unsubscribe?.()
     messagesChannel?.unsubscribe?.()
+    clearInterval(heartbeatTimer)
     if (session) start(session)
     else scheduleRender()
   })

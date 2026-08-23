@@ -149,6 +149,13 @@ export async function sendMessage(matchId, body) {
 
 export async function markMessagesRead(matchId) {
   if (!backendConfigured || !matchId) return
+  // A message counts as read only while the actual chat view is visible.
+  // activeMatch can stay set while the user is on the match list, so using
+  // activeMatch alone would incorrectly clear unread badges in the background.
+  const chatIsActuallyOpen = typeof document !== 'undefined'
+    && document.visibilityState === 'visible'
+    && !!document.querySelector('.chat-head')
+  if (!chatIsActuallyOpen) return
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return
   const { error } = await supabase.from('messages').update({ read_at: new Date().toISOString() }).eq('match_id', matchId).neq('sender_id', user.id).is('read_at', null)

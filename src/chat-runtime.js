@@ -15,6 +15,8 @@ if (backendConfigured && supabase) {
   let domTimer = null
   let heartbeatTimer = null
   let refreshing = false
+  let lastAutoScrolledMatchId = null
+  let stickToLatest = true
   const readGraceUntil = new Map()
   const lastAckAt = new Map()
 
@@ -35,6 +37,65 @@ if (backendConfigured && supabase) {
   const debounceRefresh = (delay = 700) => {
     clearTimeout(refreshTimer)
     refreshTimer = setTimeout(refreshAll, delay)
+  }
+
+  function lastChatBubble() {
+    const bubbles = document.querySelectorAll('.chat-box .bubble:not(.typing-bubble)')
+    return bubbles[bubbles.length - 1] || null
+  }
+
+  function isNearLatest() {
+    const last = lastChatBubble()
+    if (!last) return true
+    const rect = last.getBoundingClientRect()
+    return rect.bottom <= window.innerHeight + 180
+  }
+
+  function scrollToLatest(behavior = 'auto') {
+    const last = lastChatBubble()
+    if (!last) return
+    requestAnimationFrame(() => {
+      try { last.scrollIntoView({ behavior, block: 'end' }) } catch { last.scrollIntoView(false) }
+      stickToLatest = true
+      renderJumpButton()
+    })
+  }
+
+  function renderJumpButton() {
+    const chatOpen = !!document.querySelector('.chat-head') && !!document.querySelector('.chat-box')
+    let button = document.querySelector('.chat-jump-latest')
+    if (!chatOpen) { button?.remove(); return }
+    const show = !isNearLatest()
+    if (!show) { button?.remove(); return }
+    if (!button) {
+      button = document.createElement('button')
+      button.type = 'button'
+      button.className = 'chat-jump-latest'
+      button.setAttribute('aria-label', 'Zu den neuesten Nachrichten')
+      button.innerHTML = '↓'
+      button.addEventListener('click', () => scrollToLatest('smooth'))
+      document.body.appendChild(button)
+    }
+  }
+
+  function renderChatViewport() {
+    const head = document.querySelector('.chat-head')
+    const box = document.querySelector('.chat-box')
+    if (!head || !box || !activeMatchId) {
+      lastAutoScrolledMatchId = null
+      document.querySelector('.chat-jump-latest')?.remove()
+      return
+    }
+
+    if (lastAutoScrolledMatchId !== activeMatchId) {
+      lastAutoScrolledMatchId = activeMatchId
+      stickToLatest = true
+      setTimeout(() => scrollToLatest('auto'), 80)
+      return
+    }
+
+    if (stickToLatest && isNearLatest()) setTimeout(() => scrollToLatest('auto'), 20)
+    renderJumpButton()
   }
 
   async function acknowledgeMatch(matchId, force = false) {
@@ -184,6 +245,7 @@ if (backendConfigured && supabase) {
     renderNavBadge()
     renderMatchRows()
     renderChatPresence()
+    renderChatViewport()
     renderNotificationControl()
   }
 
@@ -199,6 +261,7 @@ if (backendConfigured && supabase) {
     if (!message?.match_id) { debounceRefresh(); return }
 
     if (payload.eventType === 'INSERT') {
+      const wasNearLatest = isNearLatest()
       lastMessageByMatch.set(message.match_id, message)
       const isIncoming = message.sender_id !== currentUser?.id
       const chatIsOpen = activeMatchId === message.match_id && !!document.querySelector('.chat-head') && document.visibilityState === 'visible'
@@ -206,6 +269,13 @@ if (backendConfigured && supabase) {
       else if (isIncoming) unreadByMatch.set(message.match_id, (unreadByMatch.get(message.match_id) || 0) + 1)
       showIncomingNotification(message)
       scheduleRender(20)
+      if (chatIsOpen && (message.sender_id === currentUser?.id || wasNearLatest)) {
+        stickToLatest = true
+        setTimeout(() => scrollToLatest('smooth'), 100)
+      } else if (chatIsOpen) {
+        stickToLatest = false
+        setTimeout(renderJumpButton, 100)
+      }
       debounceRefresh(1200)
       return
     }
@@ -253,19 +323,33 @@ if (backendConfigured && supabase) {
     const matchButton = event.target.closest?.('.match-list > button')
     if (matchButton?.dataset?.matchId) {
       activeMatchId = matchButton.dataset.matchId
+      lastAutoScrolledMatchId = null
+      stickToLatest = true
       acknowledgeMatch(activeMatchId, true)
+      setTimeout(() => scrollToLatest('auto'), 140)
     }
     const chatsNav = event.target.closest?.('nav.nav.five button')
     if (chatsNav?.querySelector('span')?.textContent?.trim() === 'Chats') {
       activeMatchId = null
+      lastAutoScrolledMatchId = null
+      document.querySelector('.chat-jump-latest')?.remove()
       debounceRefresh(80)
     }
   }, true)
 
+  window.addEventListener('scroll', () => {
+    if (!document.querySelector('.chat-head')) return
+    stickToLatest = isNearLatest()
+    renderJumpButton()
+  }, { passive: true })
+
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
       trackPresence()
-      if (activeMatchId && document.querySelector('.chat-head')) acknowledgeMatch(activeMatchId, true)
+      if (activeMatchId && document.querySelector('.chat-head')) {
+        acknowledgeMatch(activeMatchId, true)
+        setTimeout(() => scrollToLatest('auto'), 80)
+      }
       debounceRefresh(120)
       scheduleRender(40)
     }
@@ -291,8 +375,10 @@ if (backendConfigured && supabase) {
     if (session?.user?.id === currentUser?.id) return
     currentUser = session?.user || null
     unreadByMatch = new Map(); lastMessageByMatch = new Map(); matches = []; onlineUsers = new Set(); activeMatchId = null
+    lastAutoScrolledMatchId = null; stickToLatest = true
     readGraceUntil.clear(); lastAckAt.clear()
     presenceChannel?.unsubscribe?.(); messagesChannel?.unsubscribe?.(); clearInterval(heartbeatTimer)
+    document.querySelector('.chat-jump-latest')?.remove()
     if (session) start(session); else scheduleRender()
   })
 }

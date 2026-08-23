@@ -1,5 +1,5 @@
 import { backendConfigured, supabase } from './lib/supabase'
-import { listMatches, loadMessages } from './lib/backend'
+import { listMatches, loadMessages, markMessagesRead } from './lib/backend'
 
 if (backendConfigured && supabase) {
   let currentUser = null
@@ -15,6 +15,8 @@ if (backendConfigured && supabase) {
   let domTimer = null
   let heartbeatTimer = null
   let refreshing = false
+  const readGraceUntil = new Map()
+  const lastAckAt = new Map()
 
   const getMatchName = match => match?.person?.display_name || 'Match'
   const formatListTime = value => {
@@ -35,6 +37,24 @@ if (backendConfigured && supabase) {
     refreshTimer = setTimeout(refreshAll, delay)
   }
 
+  async function acknowledgeMatch(matchId, force = false) {
+    if (!matchId || !currentUser) return
+    const now = Date.now()
+    if (!force && now - (lastAckAt.get(matchId) || 0) < 1800) return
+    lastAckAt.set(matchId, now)
+    readGraceUntil.set(matchId, now + 5000)
+    unreadByMatch.set(matchId, 0)
+    scheduleRender(10)
+    try {
+      await markMessagesRead(matchId)
+      readGraceUntil.set(matchId, Date.now() + 1800)
+    } catch {
+      readGraceUntil.delete(matchId)
+    } finally {
+      debounceRefresh(350)
+    }
+  }
+
   async function refreshAll() {
     if (!currentUser || refreshing) return
     refreshing = true
@@ -43,9 +63,12 @@ if (backendConfigured && supabase) {
       const entries = await Promise.all(freshMatches.map(async match => {
         try {
           const rows = await loadMessages(match.id)
+          const dbCount = rows.filter(m => m.sender_id !== currentUser.id && !m.read_at).length
+          const grace = (readGraceUntil.get(match.id) || 0) > Date.now()
+          const chatOpen = activeMatchId === match.id && document.visibilityState === 'visible' && !!document.querySelector('.chat-head')
           return {
             id: match.id,
-            count: rows.filter(m => m.sender_id !== currentUser.id && !m.read_at).length,
+            count: grace || chatOpen ? 0 : dbCount,
             last: rows.at(-1) || null
           }
         } catch {
@@ -137,6 +160,7 @@ if (backendConfigured && supabase) {
     activeMatchId = match.id
     head.dataset.matchId = match.id
     head.dataset.personId = otherId
+    if (document.visibilityState === 'visible') acknowledgeMatch(match.id)
     const online = onlineUsers.has(otherId)
     const text = online ? 'online' : (lastSeen.has(otherId) ? 'zuletzt online vor kurzem' : 'offline')
     status.classList.toggle('presence-online', online)
@@ -178,15 +202,19 @@ if (backendConfigured && supabase) {
       lastMessageByMatch.set(message.match_id, message)
       const isIncoming = message.sender_id !== currentUser?.id
       const chatIsOpen = activeMatchId === message.match_id && !!document.querySelector('.chat-head') && document.visibilityState === 'visible'
-      if (isIncoming && !chatIsOpen) unreadByMatch.set(message.match_id, (unreadByMatch.get(message.match_id) || 0) + 1)
+      if (isIncoming && chatIsOpen) acknowledgeMatch(message.match_id, true)
+      else if (isIncoming) unreadByMatch.set(message.match_id, (unreadByMatch.get(message.match_id) || 0) + 1)
       showIncomingNotification(message)
       scheduleRender(20)
-      // Reconcile with database after the optimistic update.
       debounceRefresh(1200)
       return
     }
 
-    // UPDATE is typically read_at changing. Reconcile once, rather than racing the UI.
+    if (payload.eventType === 'UPDATE' && activeMatchId === message.match_id && document.visibilityState === 'visible') {
+      unreadByMatch.set(message.match_id, 0)
+      readGraceUntil.set(message.match_id, Date.now() + 1200)
+      scheduleRender(10)
+    }
     debounceRefresh(500)
   }
 
@@ -211,7 +239,7 @@ if (backendConfigured && supabase) {
   }
   function setupMessageObserver() {
     messagesChannel?.unsubscribe?.()
-    messagesChannel = supabase.channel(`one2us-global-messages-v2-${currentUser.id}`)
+    messagesChannel = supabase.channel(`one2us-global-messages-v3-${currentUser.id}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, applyRealtimeMessage)
       .subscribe()
   }
@@ -225,21 +253,29 @@ if (backendConfigured && supabase) {
     const matchButton = event.target.closest?.('.match-list > button')
     if (matchButton?.dataset?.matchId) {
       activeMatchId = matchButton.dataset.matchId
-      unreadByMatch.set(activeMatchId, 0)
-      scheduleRender(20)
-      debounceRefresh(900)
+      acknowledgeMatch(activeMatchId, true)
     }
     const chatsNav = event.target.closest?.('nav.nav.five button')
     if (chatsNav?.querySelector('span')?.textContent?.trim() === 'Chats') {
       activeMatchId = null
-      debounceRefresh(50)
+      debounceRefresh(80)
     }
   }, true)
 
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') { trackPresence(); debounceRefresh(80); scheduleRender(40) }
+    if (document.visibilityState === 'visible') {
+      trackPresence()
+      if (activeMatchId && document.querySelector('.chat-head')) acknowledgeMatch(activeMatchId, true)
+      debounceRefresh(120)
+      scheduleRender(40)
+    }
   })
-  window.addEventListener('focus', () => { trackPresence(); debounceRefresh(80); scheduleRender(40) })
+  window.addEventListener('focus', () => {
+    trackPresence()
+    if (activeMatchId && document.querySelector('.chat-head')) acknowledgeMatch(activeMatchId)
+    debounceRefresh(120)
+    scheduleRender(40)
+  })
 
   async function start(session) {
     currentUser = session?.user || null
@@ -255,6 +291,7 @@ if (backendConfigured && supabase) {
     if (session?.user?.id === currentUser?.id) return
     currentUser = session?.user || null
     unreadByMatch = new Map(); lastMessageByMatch = new Map(); matches = []; onlineUsers = new Set(); activeMatchId = null
+    readGraceUntil.clear(); lastAckAt.clear()
     presenceChannel?.unsubscribe?.(); messagesChannel?.unsubscribe?.(); clearInterval(heartbeatTimer)
     if (session) start(session); else scheduleRender()
   })

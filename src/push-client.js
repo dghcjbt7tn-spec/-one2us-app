@@ -1,6 +1,8 @@
 import { backendConfigured, supabase } from './lib/supabase'
 
 const vapidPublicKey = import.meta.env.VITE_VAPID_PUBLIC_KEY
+let pushChannel = null
+let currentUserId = null
 
 function base64ToUint8Array(value) {
   const padding = '='.repeat((4 - value.length % 4) % 4)
@@ -75,6 +77,30 @@ function ensureButton() {
   profile.appendChild(button)
 }
 
+async function startOutgoingPushBridge(session) {
+  const userId = session?.user?.id || null
+  if (userId === currentUserId && pushChannel) return
+  if (pushChannel) {
+    await supabase.removeChannel(pushChannel).catch(()=>{})
+    pushChannel = null
+  }
+  currentUserId = userId
+  if (!userId) return
+
+  pushChannel = supabase.channel(`push-outgoing-${userId}`)
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `sender_id=eq.${userId}` }, async payload => {
+      const messageId = payload.new?.id
+      if (!messageId) return
+      try { await supabase.functions.invoke('send-push', { body: { messageId } }) }
+      catch (error) { console.warn('Push delivery failed', error) }
+    })
+    .subscribe()
+}
+
+if (backendConfigured) {
+  supabase.auth.getSession().then(({ data }) => startOutgoingPushBridge(data.session)).catch(()=>{})
+  supabase.auth.onAuthStateChange((_event, session) => startOutgoingPushBridge(session))
+}
 if ('serviceWorker' in navigator) registration().catch(()=>{})
 const observer = new MutationObserver(ensureButton)
 observer.observe(document.getElementById('root') || document.body, { childList: true, subtree: true })

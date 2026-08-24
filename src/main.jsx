@@ -4,6 +4,7 @@ import App from './App'
 import './styles.css'
 import './chat-polish.css'
 import './chat-runtime.js'
+import './chat-dates.js'
 import './chat-scroll-fix.js'
 
 ReactDOM.createRoot(document.getElementById('root')).render(

@@ -1,12 +1,12 @@
-// Robust iOS/Safari chat bottom positioning.
-// This file is the single authority for initial chat positioning. The main
-// runtime also calls scrollIntoView on the last bubble; on iOS that can pull
-// the view slightly upward after we already reached the composer. During the
-// opening phase we therefore suppress bubble scrollIntoView calls and keep the
-// composer as the only bottom anchor.
+// iOS/Safari chat bottom lock.
+// React, Supabase and the enhancement runtime can still change layout for a
+// short time after a chat opens. During that opening window we pin the real
+// scroll container to the composer so a delayed render cannot pull the view
+// back up. After the window ends, manual scrolling is untouched.
 let lastChatKey = null
-let settleTimer = null
-let opening = false
+let lockTimer = null
+let lockInterval = null
+let lockUntil = 0
 let userScrolledAway = false
 
 function chatIsOpen() {
@@ -18,51 +18,65 @@ function chatKey() {
   return head?.dataset?.matchId || head?.dataset?.personId || head?.querySelector('h2')?.textContent?.trim() || 'chat'
 }
 
+function scrollingRoot() {
+  return document.scrollingElement || document.documentElement
+}
+
 function scrollParents(el) {
   const result = []
   let node = el?.parentElement
   while (node && node !== document.body) {
     const style = getComputedStyle(node)
-    const y = style.overflowY
-    if ((y === 'auto' || y === 'scroll') && node.scrollHeight > node.clientHeight + 2) result.push(node)
+    if ((style.overflowY === 'auto' || style.overflowY === 'scroll') && node.scrollHeight > node.clientHeight + 2) result.push(node)
     node = node.parentElement
   }
-  const doc = document.scrollingElement || document.documentElement
+  const doc = scrollingRoot()
   if (doc) result.push(doc)
   return [...new Set(result)]
 }
 
-function browserChromeInset() {
-  const vv = window.visualViewport
-  if (!vv) return 0
-  return Math.max(0, Math.min(180, window.innerHeight - vv.height - vv.offsetTop))
-}
+const nativeScrollIntoView = Element.prototype.scrollIntoView
 
 function forceBottom() {
   if (!chatIsOpen()) return
   const input = document.querySelector('.chat-input')
-  const target = input || document.querySelector('.chat-box')
-  if (!target) return
+  if (!input) return
 
-  // Use the native method directly so our bubble guard below cannot interfere.
-  try { nativeScrollIntoView.call(target, { behavior: 'auto', block: 'end', inline: 'nearest' }) } catch { nativeScrollIntoView.call(target, false) }
+  try { nativeScrollIntoView.call(input, { behavior: 'auto', block: 'end', inline: 'nearest' }) } catch { nativeScrollIntoView.call(input, false) }
 
   requestAnimationFrame(() => {
-    const inset = browserChromeInset()
-    for (const scroller of scrollParents(target)) {
-      scroller.scrollTop = scroller.scrollHeight + inset
-    }
-    const doc = document.scrollingElement || document.documentElement
-    window.scrollTo(0, doc.scrollHeight + inset)
+    for (const scroller of scrollParents(input)) scroller.scrollTop = scroller.scrollHeight
+    const doc = scrollingRoot()
+    if (doc) window.scrollTo(0, doc.scrollHeight)
   })
 }
 
-function settleToBottom(delay = 110) {
-  clearTimeout(settleTimer)
-  settleTimer = setTimeout(() => {
-    settleTimer = null
+function stopBottomLock() {
+  clearTimeout(lockTimer)
+  clearInterval(lockInterval)
+  lockTimer = null
+  lockInterval = null
+  lockUntil = 0
+}
+
+function startBottomLock(duration = 3400) {
+  stopBottomLock()
+  lockUntil = Date.now() + duration
+  userScrolledAway = false
+  forceBottom()
+
+  // Presence/read-state/Supabase updates can arrive 1–2 seconds after opening.
+  // Keep the composer pinned through that settling period so there is no late
+  // jump upward. This is intentionally short-lived.
+  lockInterval = setInterval(() => {
+    if (!chatIsOpen() || Date.now() >= lockUntil) {
+      stopBottomLock()
+      return
+    }
     forceBottom()
-  }, delay)
+  }, 80)
+
+  lockTimer = setTimeout(stopBottomLock, duration + 100)
 }
 
 function distanceFromBottom() {
@@ -73,13 +87,12 @@ function distanceFromBottom() {
   return Math.max(0, input.getBoundingClientRect().bottom - viewportBottom)
 }
 
-// Stop the older runtime from scrolling the last bubble upward just after the
-// dedicated iOS bottom fix has positioned the composer correctly.
-const nativeScrollIntoView = Element.prototype.scrollIntoView
+// While the chat is settling, redirect any legacy bubble scroll to the real
+// bottom anchor instead of allowing it to move the viewport upward.
 Element.prototype.scrollIntoView = function(options) {
   const isChatBubble = this?.matches?.('.chat-box .bubble')
-  if (isChatBubble && chatIsOpen() && opening) {
-    settleToBottom(40)
+  if (isChatBubble && chatIsOpen() && Date.now() < lockUntil) {
+    requestAnimationFrame(forceBottom)
     return
   }
   return nativeScrollIntoView.call(this, options)
@@ -88,32 +101,22 @@ Element.prototype.scrollIntoView = function(options) {
 const observer = new MutationObserver(mutations => {
   if (!chatIsOpen()) {
     lastChatKey = null
-    opening = false
     userScrolledAway = false
-    clearTimeout(settleTimer)
+    stopBottomLock()
     return
   }
 
   const key = chatKey()
   if (key !== lastChatKey) {
     lastChatKey = key
-    opening = true
-    userScrolledAway = false
-    settleToBottom(120)
-    setTimeout(() => {
-      // Final position once Supabase/React have finished hydrating the chat.
-      forceBottom()
-      opening = false
-    }, 900)
+    startBottomLock()
     return
   }
 
   const bubbleChanged = mutations.some(m => [...m.addedNodes].some(node =>
     node.nodeType === 1 && (node.matches?.('.bubble') || node.querySelector?.('.bubble'))
   ))
-  if (!bubbleChanged) return
-
-  if (opening || !userScrolledAway) settleToBottom(90)
+  if (bubbleChanged && Date.now() < lockUntil) requestAnimationFrame(forceBottom)
 })
 
 observer.observe(document.getElementById('root') || document.body, { childList: true, subtree: true })
@@ -121,18 +124,20 @@ observer.observe(document.getElementById('root') || document.body, { childList: 
 document.addEventListener('click', event => {
   if (event.target.closest?.('.match-list > button')) {
     lastChatKey = null
-    opening = true
-    userScrolledAway = false
-    settleToBottom(180)
+    setTimeout(() => { if (chatIsOpen()) startBottomLock() }, 90)
   }
 }, true)
 
 window.addEventListener('scroll', () => {
-  if (!chatIsOpen() || opening) return
+  if (!chatIsOpen()) return
+  if (Date.now() < lockUntil) {
+    requestAnimationFrame(forceBottom)
+    return
+  }
   userScrolledAway = distanceFromBottom() > 220
 }, { passive: true })
 
 window.visualViewport?.addEventListener('resize', () => {
   if (!chatIsOpen()) return
-  if (opening || !userScrolledAway) settleToBottom(120)
+  if (Date.now() < lockUntil || !userScrolledAway) requestAnimationFrame(forceBottom)
 })

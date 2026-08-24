@@ -1,16 +1,11 @@
-// iOS/Safari chat viewport fix.
-// On first opening a chat, React/Supabase can render the header before the
-// messages arrive. Scrolling immediately therefore lands too high. We keep a
-// short "opening" phase and perform ONE debounced bottom jump after the latest
-// batch of bubbles has rendered. After that we no longer fight manual scrolling.
+// Robust iOS/Safari chat bottom positioning.
+// The app can scroll in more than one container on mobile, while Safari's
+// visual viewport is smaller than the layout viewport. We therefore scroll
+// every real scroll parent and reserve visible space for the browser chrome.
 let lastChatKey = null
-let openingUntil = 0
-let bottomTimer = null
-
-function clearBottomTimer() {
-  if (bottomTimer) clearTimeout(bottomTimer)
-  bottomTimer = null
-}
+let settleTimer = null
+let opening = false
+let userScrolledAway = false
 
 function chatIsOpen() {
   return !!document.querySelector('.chat-head') && !!document.querySelector('.chat-box') && !!document.querySelector('.chat-input')
@@ -21,75 +16,90 @@ function chatKey() {
   return head?.dataset?.matchId || head?.dataset?.personId || head?.querySelector('h2')?.textContent?.trim() || 'chat'
 }
 
-function bottomTarget() {
-  // The composer is the real bottom of the WhatsApp-style chat. Scrolling only
-  // to the last bubble can leave the input/nav below Safari's visual viewport.
-  return document.querySelector('.chat-input') || document.querySelector('.chat-box .bubble:last-of-type')
+function scrollParents(el) {
+  const result = []
+  let node = el?.parentElement
+  while (node && node !== document.body) {
+    const style = getComputedStyle(node)
+    const y = style.overflowY
+    if ((y === 'auto' || y === 'scroll') && node.scrollHeight > node.clientHeight + 2) result.push(node)
+    node = node.parentElement
+  }
+  const doc = document.scrollingElement || document.documentElement
+  if (doc) result.push(doc)
+  return [...new Set(result)]
 }
 
-function goToBottom() {
+function browserChromeInset() {
+  const vv = window.visualViewport
+  if (!vv) return 0
+  // Difference between layout and visual viewport is mostly Safari chrome /
+  // keyboard. Clamp it so we do not create giant jumps when keyboard opens.
+  return Math.max(0, Math.min(180, window.innerHeight - vv.height - vv.offsetTop))
+}
+
+function forceBottom() {
   if (!chatIsOpen()) return
-  const target = bottomTarget()
+  const input = document.querySelector('.chat-input')
+  const box = document.querySelector('.chat-box')
+  const target = input || box
   if (!target) return
-  try {
-    target.scrollIntoView({ behavior: 'auto', block: 'end', inline: 'nearest' })
-  } catch {
-    target.scrollIntoView(false)
-  }
-  // A second direct assignment in the same frame helps iOS when the browser
-  // toolbar changes the visual viewport while scrollIntoView is resolving.
+
+  // First make the actual composer the anchor, not just the last bubble.
+  try { target.scrollIntoView({ behavior: 'auto', block: 'end', inline: 'nearest' }) } catch { target.scrollIntoView(false) }
+
   requestAnimationFrame(() => {
-    const doc = document.scrollingElement || document.documentElement
-    doc.scrollTop = doc.scrollHeight
+    const inset = browserChromeInset()
+    for (const scroller of scrollParents(target)) {
+      scroller.scrollTop = scroller.scrollHeight + inset
+    }
+    window.scrollTo(0, (document.scrollingElement || document.documentElement).scrollHeight + inset)
   })
 }
 
-function scheduleBottom(delay = 90) {
-  clearBottomTimer()
-  bottomTimer = setTimeout(() => {
-    bottomTimer = null
-    goToBottom()
-  }, delay)
+function settleToBottom() {
+  clearTimeout(settleTimer)
+  settleTimer = setTimeout(() => {
+    settleTimer = null
+    forceBottom()
+    // One final correction after Safari has finished collapsing/expanding its bars.
+    setTimeout(forceBottom, 180)
+  }, 100)
+}
+
+function distanceFromBottom() {
+  const input = document.querySelector('.chat-input')
+  if (!input) return 9999
+  const vv = window.visualViewport
+  const viewportBottom = (vv?.offsetTop || 0) + (vv?.height || window.innerHeight)
+  return Math.max(0, input.getBoundingClientRect().bottom - viewportBottom)
 }
 
 const observer = new MutationObserver(mutations => {
   if (!chatIsOpen()) {
     lastChatKey = null
-    openingUntil = 0
-    clearBottomTimer()
+    opening = false
+    userScrolledAway = false
+    clearTimeout(settleTimer)
     return
   }
 
   const key = chatKey()
   if (key !== lastChatKey) {
     lastChatKey = key
-    openingUntil = Date.now() + 2200
-    // Immediate attempt for already-cached chats. Further message hydration is
-    // handled by the debounced mutation branch below.
-    scheduleBottom(40)
+    opening = true
+    userScrolledAway = false
+    settleToBottom()
+    setTimeout(() => { opening = false }, 1600)
     return
   }
 
-  const addedBubble = mutations.some(m => [...m.addedNodes].some(node =>
+  const bubbleChanged = mutations.some(m => [...m.addedNodes].some(node =>
     node.nodeType === 1 && (node.matches?.('.bubble') || node.querySelector?.('.bubble'))
   ))
-  if (!addedBubble) return
+  if (!bubbleChanged) return
 
-  // During initial hydration always follow the newest rendered batch. Because
-  // this is debounced, many bubble inserts result in one final jump, not jitter.
-  if (Date.now() < openingUntil) {
-    scheduleBottom(120)
-    return
-  }
-
-  // Once the chat is established, follow new messages only when the user is
-  // already close to the bottom or when the new message is their own.
-  const doc = document.scrollingElement || document.documentElement
-  const viewportHeight = window.visualViewport?.height || window.innerHeight
-  const distance = doc.scrollHeight - (doc.scrollTop + viewportHeight)
-  const bubbles = document.querySelectorAll('.chat-box .bubble:not(.typing-bubble)')
-  const last = bubbles[bubbles.length - 1]
-  if (distance < 260 || last?.classList.contains('me')) scheduleBottom(50)
+  if (opening || !userScrolledAway) settleToBottom()
 })
 
 observer.observe(document.getElementById('root') || document.body, { childList: true, subtree: true })
@@ -97,17 +107,18 @@ observer.observe(document.getElementById('root') || document.body, { childList: 
 document.addEventListener('click', event => {
   if (event.target.closest?.('.match-list > button')) {
     lastChatKey = null
-    openingUntil = Date.now() + 2200
-    scheduleBottom(160)
+    opening = true
+    userScrolledAway = false
+    setTimeout(settleToBottom, 120)
   }
 }, true)
 
-// If the iPhone keyboard opens while the user is already at the bottom, keep
-// the composer visible. This is deliberately a single debounced correction.
+window.addEventListener('scroll', () => {
+  if (!chatIsOpen() || opening) return
+  userScrolledAway = distanceFromBottom() > 220
+}, { passive: true })
+
 window.visualViewport?.addEventListener('resize', () => {
   if (!chatIsOpen()) return
-  const doc = document.scrollingElement || document.documentElement
-  const viewportHeight = window.visualViewport?.height || window.innerHeight
-  const distance = doc.scrollHeight - (doc.scrollTop + viewportHeight)
-  if (Date.now() < openingUntil || distance < 300) scheduleBottom(100)
+  if (opening || !userScrolledAway) settleToBottom()
 })

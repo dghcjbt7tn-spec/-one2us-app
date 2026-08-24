@@ -7,6 +7,7 @@ import './chat-runtime.js'
 import './chat-scroll-fix.js'
 import './chat-dates.js'
 import './chat-whatsapp-polish.js'
+import './chat-media.js'
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>

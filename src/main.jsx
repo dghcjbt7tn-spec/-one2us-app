@@ -3,11 +3,13 @@ import ReactDOM from 'react-dom/client'
 import App from './App'
 import './styles.css'
 import './chat-polish.css'
+import './push.css'
 import './chat-runtime.js'
 import './chat-scroll-fix.js'
 import './chat-dates.js'
 import './chat-whatsapp-polish.js'
 import './chat-media.js'
+import './push-client.js'
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>

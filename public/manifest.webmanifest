@@ -1,0 +1,12 @@
+{
+  "name": "One:2:Us",
+  "short_name": "One:2:Us",
+  "description": "From me to we. Dating, Freundschaft und gemeinsame Erlebnisse.",
+  "start_url": "/-one2us-app/",
+  "scope": "/-one2us-app/",
+  "display": "standalone",
+  "background_color": "#080a0e",
+  "theme_color": "#080a0e",
+  "orientation": "portrait-primary",
+  "icons": []
+}
